@@ -1,0 +1,35 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# macOS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Raw Olist data must be downloaded separately
+/data/
+/archive/
+/raw/
+olist_*_dataset.csv
+product_category_name_translation.csv
+*.zip
+
+# Large or machine-specific generated artifacts
+outputs/data/enriched_order_items.csv.gz
+outputs/run_manifest.json
+outputs/logs/
+outputs_quick/
+
+# Temporary office files
+~$*.docx
+~$*.xlsx

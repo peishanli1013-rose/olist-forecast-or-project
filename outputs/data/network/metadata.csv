@@ -1,0 +1,7 @@
+parameter,value,source
+candidate_hubs,"SP, PR, MG, RJ, SC, RS",top seller states by selected-category volume
+global_late_dispatch_rate,0.08782505390064681,Olist observed
+global_late_delivery_rate,0.08075170335624267,Olist observed
+global_median_freight,16.11,Olist observed
+lead_time_weeks,1,planning scenario
+opening_weeks_cover,2.0,planning scenario

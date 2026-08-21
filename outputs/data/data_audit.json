@@ -1,0 +1,35 @@
+{
+  "item_lines_total": 112650,
+  "item_lines_primary_status": 112643,
+  "stable_window_start": "2017-01-02",
+  "stable_window_end": "2018-08-20",
+  "stable_weeks": 86,
+  "categories": [
+    "bed_bath_table",
+    "health_beauty",
+    "sports_leisure",
+    "furniture_decor",
+    "computers_accessories",
+    "housewares",
+    "watches_gifts",
+    "telephony",
+    "garden_tools",
+    "auto"
+  ],
+  "regions": [
+    "North",
+    "Northeast",
+    "Central-West",
+    "Southeast",
+    "South"
+  ],
+  "series": 50,
+  "panel_rows": 4300,
+  "stable_units_all_categories": 112147,
+  "selected_units": 71363,
+  "selected_unit_share": 0.636334453886417,
+  "products_fewer_than_five_units_share": 0.8531118304525743,
+  "products_single_unit_share": 0.549471691198925,
+  "missing_category_share": 0.0,
+  "missing_customer_region_share": 0.0
+}
