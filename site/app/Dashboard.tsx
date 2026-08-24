@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Page = "overview" | "demand" | "forecast" | "optimization" | "sensitivity";
 type LabMode = "verified" | "live";
@@ -161,6 +161,139 @@ function estimateScenario(inputs: WhatIfInputs): Scenario {
   return result;
 }
 
+const metricLabels: Record<MetricKey, string> = {
+  cost: "Total cost (R$)",
+  fill: "Fill rate (%)",
+  shortage: "Shortage units",
+  inventory: "Ending inventory",
+};
+
+function ResponseCurve({ control, inputs, metric }: { control: InputControl; inputs: WhatIfInputs; metric: MetricKey }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const draw = () => {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.scale(ratio, ratio);
+      context.clearRect(0, 0, width, height);
+
+      const left = 58;
+      const right = 18;
+      const top = 20;
+      const bottom = 38;
+      const plotWidth = width - left - right;
+      const plotHeight = height - top - bottom;
+      const sampleCount = 41;
+      const points = Array.from({ length: sampleCount }, (_, index) => {
+        const x = control.min + (control.max - control.min) * index / (sampleCount - 1);
+        const sampleInputs = { ...inputs, [control.key]: x };
+        const exactId = exactScenarioFor(sampleInputs);
+        const value = (exactId ? scenarios[exactId] : estimateScenario(sampleInputs))[metric];
+        return { x, value };
+      });
+      const values = points.map((point) => point.value);
+      const spread = Math.max(...values) - Math.min(...values);
+      const padding = Math.max(spread * 0.14, metric === "fill" ? 0.5 : 1);
+      const yMin = Math.min(...values) - padding;
+      const yMax = Math.max(...values) + padding;
+      const xPosition = (value: number) => left + (value - control.min) / (control.max - control.min) * plotWidth;
+      const yPosition = (value: number) => top + (yMax - value) / (yMax - yMin) * plotHeight;
+
+      context.font = "10px Arial";
+      context.textBaseline = "middle";
+      for (let index = 0; index <= 4; index += 1) {
+        const y = top + plotHeight * index / 4;
+        const value = yMax - (yMax - yMin) * index / 4;
+        context.strokeStyle = "#e3e6df";
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(left, y);
+        context.lineTo(width - right, y);
+        context.stroke();
+        context.fillStyle = "#7b8880";
+        context.textAlign = "right";
+        context.fillText(metric === "cost" ? `${Math.round(value / 1000)}k` : value.toFixed(metric === "fill" ? 1 : 0), left - 8, y);
+      }
+
+      const fill = context.createLinearGradient(0, top, 0, height - bottom);
+      fill.addColorStop(0, "rgba(12, 92, 71, .24)");
+      fill.addColorStop(1, "rgba(12, 92, 71, 0)");
+      context.beginPath();
+      points.forEach((point, index) => {
+        const x = xPosition(point.x);
+        const y = yPosition(point.value);
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.lineTo(xPosition(control.max), height - bottom);
+      context.lineTo(xPosition(control.min), height - bottom);
+      context.closePath();
+      context.fillStyle = fill;
+      context.fill();
+
+      context.beginPath();
+      points.forEach((point, index) => {
+        const x = xPosition(point.x);
+        const y = yPosition(point.value);
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.strokeStyle = "#0c5c47";
+      context.lineWidth = 3;
+      context.lineJoin = "round";
+      context.stroke();
+
+      const anchorValues = [control.min, baseInputs[control.key], control.max];
+      for (const anchorValue of anchorValues) {
+        const anchorInputs = { ...inputs, [control.key]: anchorValue };
+        const anchorId = exactScenarioFor(anchorInputs);
+        const anchorMetric = (anchorId ? scenarios[anchorId] : estimateScenario(anchorInputs))[metric];
+        context.beginPath();
+        context.arc(xPosition(anchorValue), yPosition(anchorMetric), 4.5, 0, Math.PI * 2);
+        context.fillStyle = "#fffdf8";
+        context.fill();
+        context.strokeStyle = "#0c5c47";
+        context.lineWidth = 2;
+        context.stroke();
+      }
+
+      const currentX = inputs[control.key];
+      const currentExact = exactScenarioFor(inputs);
+      const currentValue = (currentExact ? scenarios[currentExact] : estimateScenario(inputs))[metric];
+      context.beginPath();
+      context.arc(xPosition(currentX), yPosition(currentValue), 6, 0, Math.PI * 2);
+      context.fillStyle = "#e6b955";
+      context.fill();
+      context.strokeStyle = "#fffdf8";
+      context.lineWidth = 2;
+      context.stroke();
+
+      context.fillStyle = "#6f7d75";
+      context.textAlign = "center";
+      context.textBaseline = "top";
+      context.fillText(`${control.min}${control.suffix}`, left, height - bottom + 12);
+      context.fillText(`base ${baseInputs[control.key]}${control.suffix}`, xPosition(baseInputs[control.key]), height - bottom + 12);
+      context.fillText(`${control.max}${control.suffix}`, width - right, height - bottom + 12);
+    };
+
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [control, inputs, metric]);
+
+  return <canvas ref={canvasRef} className="responseCanvas" role="img" aria-label={`${metricLabels[metric]} response curve for ${control.label}`} />;
+}
+
 function PageTitle({ kicker, title, copy }: { kicker: string; title: string; copy: string }) {
   return <header className="sectionHeader"><span>{kicker}</span><h1>{title}</h1><p>{copy}</p></header>;
 }
@@ -175,6 +308,8 @@ export default function Dashboard() {
   const [groupId, setGroupId] = useState("safety");
   const [scenarioId, setScenarioId] = useState("base");
   const [whatIfInputs, setWhatIfInputs] = useState<WhatIfInputs>({ ...baseInputs });
+  const [curveInput, setCurveInput] = useState<InputKey>("safety");
+  const [curveMetric, setCurveMetric] = useState<MetricKey>("cost");
   const [copied, setCopied] = useState(false);
   const verifiedScenario = scenarios[scenarioId];
   const base = scenarios.base;
@@ -183,6 +318,7 @@ export default function Dashboard() {
   const liveScenario = exactLiveScenarioId ? scenarios[exactLiveScenarioId] : estimateScenario(whatIfInputs);
   const result = labMode === "verified" ? verifiedScenario : liveScenario;
   const resultIsVerified = labMode === "verified" || Boolean(exactLiveScenarioId);
+  const curveControl = inputControls.find((control) => control.key === curveInput) ?? inputControls[0];
 
   const updateInput = (key: InputKey, value: number) => {
     setWhatIfInputs((current) => ({ ...current, [key]: value }));
@@ -355,7 +491,7 @@ export default function Dashboard() {
                     {inputControls.map((control) => (
                       <label key={control.key} className="sliderControl">
                         <span><b>{control.label}</b><output>{whatIfInputs[control.key].toFixed(control.step < 1 ? 2 : 0)}{control.suffix}</output></span>
-                        <input aria-label={control.label} type="range" min={control.min} max={control.max} step={control.step} value={whatIfInputs[control.key]} onChange={(event) => updateInput(control.key, Number(event.target.value))} />
+                        <input aria-label={control.label} type="range" min={control.min} max={control.max} step={control.step} value={whatIfInputs[control.key]} onChange={(event) => { updateInput(control.key, Number(event.target.value)); setCurveInput(control.key); }} />
                         <small><i>{control.min}{control.suffix}</i><i>Base {baseInputs[control.key]}{control.suffix}</i><i>{control.max}{control.suffix}</i></small>
                       </label>
                     ))}
@@ -378,6 +514,19 @@ export default function Dashboard() {
                 <div className="panelHead"><div><span className="panelKicker">Base vs selected</span><h2>Cost and service trade-off</h2></div></div>
                 <div className="comparisonBars"><div><span>Base cost</span><div><i style={{ width: `${base.cost / Math.max(base.cost, result.cost) * 100}%` }} /></div><strong>R${money.format(base.cost)}</strong></div><div><span>Selected cost</span><div><i className="selected" style={{ width: `${result.cost / Math.max(base.cost, result.cost) * 100}%` }} /></div><strong>R${money.format(result.cost)}</strong></div><div className="fill"><span>Base service</span><div><i style={{ width: `${base.fill}%` }} /></div><strong>{base.fill.toFixed(2)}%</strong></div><div className="fill"><span>Selected service</span><div><i className="selected" style={{ width: `${result.fill}%` }} /></div><strong>{result.fill.toFixed(2)}%</strong></div></div>
               </article>
+              {labMode === "live" && (
+                <article className="responsePanel whitePanel">
+                  <div className="responseHead">
+                    <div><span className="panelKicker">Interactive response curve</span><h2>How one input changes the outcome</h2></div>
+                    <div className="curveSelectors">
+                      <label><span>Input</span><select value={curveInput} onChange={(event) => setCurveInput(event.target.value as InputKey)}>{inputControls.map((control) => <option key={control.key} value={control.key}>{control.label}</option>)}</select></label>
+                      <label><span>Metric</span><select value={curveMetric} onChange={(event) => setCurveMetric(event.target.value as MetricKey)}>{(Object.keys(metricLabels) as MetricKey[]).map((metric) => <option key={metric} value={metric}>{metricLabels[metric]}</option>)}</select></label>
+                    </div>
+                  </div>
+                  <ResponseCurve control={curveControl} inputs={whatIfInputs} metric={curveMetric} />
+                  <div className="curveLegend"><span><i className="line" /> Calibrated response</span><span><i className="anchor" /> Anchor values</span><span><i className="current" /> Current setting</span></div>
+                </article>
+              )}
               <article className={`interpretation ${resultIsVerified ? "" : "estimated"}`}><span>{resultIsVerified ? "Interpretation" : "Model boundary"}</span><p>{result.note}</p></article>
               {labMode === "live" && <article className="calibrationNote"><b>How the instant preview works</b><p>Each slider is piecewise-linear between the base case and its solved low/high anchor. When several sliders move, their measured changes are added. An exact check mark appears whenever the inputs match one of the twelve stored solver results.</p></article>}
             </div>

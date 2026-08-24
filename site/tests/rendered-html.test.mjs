@@ -60,4 +60,7 @@ test("includes the interactive what-if controls and model boundary", async () =>
   assert.match(dashboard, /type="range"/);
   assert.equal((dashboard.match(/type="range"/g) ?? []).length, 1);
   assert.match(dashboard, /inputControls\.map/);
+  assert.match(dashboard, /Interactive response curve/);
+  assert.match(dashboard, /ResponseCurve/);
+  assert.match(dashboard, /<canvas/);
 });
