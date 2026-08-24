@@ -252,13 +252,15 @@ function ResponseCurve({ control, inputs, metric }: { control: InputControl; inp
       context.lineJoin = "round";
       context.stroke();
 
-      const anchorValues = [control.min, baseInputs[control.key], control.max];
-      for (const anchorValue of anchorValues) {
-        const anchorInputs = { ...inputs, [control.key]: anchorValue };
-        const anchorId = exactScenarioFor(anchorInputs);
-        const anchorMetric = (anchorId ? scenarios[anchorId] : estimateScenario(anchorInputs))[metric];
+      const solvedAnchors = [
+        { value: control.min, scenario: control.low?.scenario ?? "base" },
+        { value: baseInputs[control.key], scenario: "base" },
+        { value: control.max, scenario: control.high?.scenario ?? "base" },
+      ].filter((anchor, index, anchors) => anchors.findIndex((candidate) => closeEnough(candidate.value, anchor.value)) === index);
+      for (const anchor of solvedAnchors) {
+        const anchorMetric = scenarios[anchor.scenario][metric];
         context.beginPath();
-        context.arc(xPosition(anchorValue), yPosition(anchorMetric), 4.5, 0, Math.PI * 2);
+        context.arc(xPosition(anchor.value), yPosition(anchorMetric), 4.5, 0, Math.PI * 2);
         context.fillStyle = "#fffdf8";
         context.fill();
         context.strokeStyle = "#0c5c47";
@@ -524,7 +526,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <ResponseCurve control={curveControl} inputs={whatIfInputs} metric={curveMetric} />
-                  <div className="curveLegend"><span><i className="line" /> Calibrated response</span><span><i className="anchor" /> Anchor values</span><span><i className="current" /> Current setting</span></div>
+                  <div className="curveLegend"><span><i className="line" /> Calibrated response</span><span><i className="anchor" /> Stored MILP runs</span><span><i className="current" /> Current setting</span></div>
                 </article>
               )}
               <article className={`interpretation ${resultIsVerified ? "" : "estimated"}`}><span>{resultIsVerified ? "Interpretation" : "Model boundary"}</span><p>{result.note}</p></article>

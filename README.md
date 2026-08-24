@@ -10,7 +10,7 @@ Live site: [Olist OR Lab](https://olist-forecast-or-lab.peishanli1013.chatgpt.si
 
 [`site/`](site/) contains the complete source for the English interactive website. It has Overview, Demand, Forecast, Optimization, and Sensitivity sections. **Verified Runs** reproduces the one-factor MILP outputs exactly. **Live What-if** lets users adjust safety buffer, lead time, service target, capacity, risk weights, and shortage value together; a piecewise-linear additive response surface calibrated to the solved anchors updates the metrics instantly. The interface labels combined previews as estimates and shows solver-verified status only when the inputs exactly match a stored solve.
 
-Live What-if includes a selectable parameter–metric response curve. Hollow points identify calibration anchors and the gold point shows the current setting. The curve is still a client-side calibrated preview, not a new optimization solve.
+Live What-if includes a selectable parameter–metric response curve. Hollow points identify stored MILP runs and the gold point shows the current setting. The curve is still a client-side calibrated preview, not a new optimization solve; when other inputs differ from base, the conditional estimated curve need not pass through the one-factor solved points.
 
 ```bash
 cd site
