@@ -17,15 +17,24 @@ class RidgeFit:
     numeric_scale: np.ndarray
     residual_scale: dict[tuple[str, str], float]
     global_residual_scale: float
+    selected_alpha: float
 
 
 class PooledRidgeForecaster:
     """Small dependency-free global Ridge model for related demand series."""
 
-    def __init__(self, panel: pd.DataFrame, alpha: float = 25.0):
+    def __init__(
+        self,
+        panel: pd.DataFrame,
+        alpha: float = 25.0,
+        alpha_grid: tuple[float, ...] | None = None,
+        calibration_weeks: int = 8,
+    ):
         self.panel = panel.copy()
         self.panel["week"] = pd.to_datetime(self.panel["week"])
         self.alpha = alpha
+        self.alpha_grid = tuple(alpha_grid) if alpha_grid else (alpha,)
+        self.calibration_weeks = calibration_weeks
         self.weeks = sorted(self.panel["week"].unique())
         self.categories = sorted(self.panel["category"].unique())
         self.regions = sorted(self.panel["region"].unique())
@@ -55,6 +64,7 @@ class PooledRidgeForecaster:
         X_rows: list[np.ndarray] = []
         y_rows: list[float] = []
         labels: list[tuple[str, str]] = []
+        target_labels: list[pd.Timestamp] = []
         train_pivot = self.pivot.loc[train_weeks]
         for category, region in self.pivot.columns:
             values = train_pivot[(category, region)].astype(float).tolist()
@@ -62,28 +72,76 @@ class PooledRidgeForecaster:
                 X_rows.append(self._features(values[:pos], train_weeks[pos], category, region))
                 y_rows.append(values[pos])
                 labels.append((category, region))
-        return np.vstack(X_rows), np.asarray(y_rows, dtype=float), labels
+                target_labels.append(pd.Timestamp(train_weeks[pos]))
+        return np.vstack(X_rows), np.asarray(y_rows, dtype=float), labels, target_labels
 
-    def fit(self, origin: pd.Timestamp) -> RidgeFit:
-        X, y, labels = self._training_matrix(origin)
+    def _fit_coefficients(self, X: np.ndarray, y: np.ndarray, alpha: float):
         numeric_mean = X[:, : self.numeric_count].mean(axis=0)
         numeric_scale = X[:, : self.numeric_count].std(axis=0)
         numeric_scale[numeric_scale < 1e-8] = 1.0
         X_scaled = X.copy()
         X_scaled[:, : self.numeric_count] = (X_scaled[:, : self.numeric_count] - numeric_mean) / numeric_scale
         X_design = np.column_stack([np.ones(len(X_scaled)), X_scaled])
-        penalty = np.eye(X_design.shape[1]) * self.alpha
+        penalty = np.eye(X_design.shape[1]) * alpha
         penalty[0, 0] = 0.0
-        lhs = X_design.T @ X_design + penalty
-        rhs = X_design.T @ y
-        coefficients = np.linalg.solve(lhs, rhs)
-        residuals = y - X_design @ coefficients
-        global_scale = float(np.sqrt(np.mean(np.square(residuals))))
-        residual_frame = pd.DataFrame(labels, columns=["category", "region"])
-        residual_frame["squared_error"] = np.square(residuals)
+        coefficients = np.linalg.solve(X_design.T @ X_design + penalty, X_design.T @ y)
+        return coefficients, numeric_mean, numeric_scale
+
+    def _matrix_predictions(
+        self,
+        X: np.ndarray,
+        coefficients: np.ndarray,
+        numeric_mean: np.ndarray,
+        numeric_scale: np.ndarray,
+    ) -> np.ndarray:
+        X_scaled = X.copy()
+        X_scaled[:, : self.numeric_count] = (X_scaled[:, : self.numeric_count] - numeric_mean) / numeric_scale
+        return np.maximum(0.0, np.column_stack([np.ones(len(X_scaled)), X_scaled]) @ coefficients)
+
+    def fit(self, origin: pd.Timestamp) -> RidgeFit:
+        X, y, labels, target_labels = self._training_matrix(origin)
+        unique_targets = sorted(set(target_labels))
+        calibration_count = min(self.calibration_weeks, max(1, len(unique_targets) // 3))
+        calibration_start = unique_targets[-calibration_count]
+        calibration_mask = np.asarray([week >= calibration_start for week in target_labels])
+        training_mask = ~calibration_mask
+        if training_mask.sum() < X.shape[1] + 1:
+            training_mask = np.ones(len(X), dtype=bool)
+            calibration_mask = np.ones(len(X), dtype=bool)
+
+        alpha_scores: list[tuple[float, float]] = []
+        calibration_fits: dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        for alpha in self.alpha_grid:
+            fit_values = self._fit_coefficients(X[training_mask], y[training_mask], alpha)
+            calibration_fits[alpha] = fit_values
+            predictions = self._matrix_predictions(X[calibration_mask], *fit_values)
+            denominator = float(np.abs(y[calibration_mask]).sum())
+            score = (
+                float(np.abs(y[calibration_mask] - predictions).sum() / denominator)
+                if denominator
+                else float(np.abs(y[calibration_mask] - predictions).mean())
+            )
+            alpha_scores.append((score, alpha))
+        selected_alpha = min(alpha_scores)[1]
+        calibration_predictions = self._matrix_predictions(
+            X[calibration_mask], *calibration_fits[selected_alpha]
+        )
+        calibration_residuals = y[calibration_mask] - calibration_predictions
+        global_scale = float(np.sqrt(np.mean(np.square(calibration_residuals))))
+        calibration_labels = [label for label, keep in zip(labels, calibration_mask) if keep]
+        residual_frame = pd.DataFrame(calibration_labels, columns=["category", "region"])
+        residual_frame["squared_error"] = np.square(calibration_residuals)
         grouped = residual_frame.groupby(["category", "region"])["squared_error"].mean().pow(0.5)
         scales = {key: max(1.0, float(value)) for key, value in grouped.items()}
-        return RidgeFit(coefficients, numeric_mean, numeric_scale, scales, max(1.0, global_scale))
+        coefficients, numeric_mean, numeric_scale = self._fit_coefficients(X, y, selected_alpha)
+        return RidgeFit(
+            coefficients,
+            numeric_mean,
+            numeric_scale,
+            scales,
+            max(1.0, global_scale),
+            selected_alpha,
+        )
 
     def _ridge_forecast(self, origin: pd.Timestamp, horizon: int) -> pd.DataFrame:
         fit = self.fit(origin)
@@ -107,6 +165,8 @@ class PooledRidgeForecaster:
                         "region": region,
                         "forecast": prediction,
                         "error_scale": fit.residual_scale.get((category, region), fit.global_residual_scale),
+                        "uncertainty_source": "chronological_holdout",
+                        "selected_alpha": fit.selected_alpha,
                         "method": "ridge",
                     }
                 )
@@ -121,7 +181,8 @@ class PooledRidgeForecaster:
             for pos in range(4, len(values)):
                 prediction = values[pos - 1] if method == "last_week" else values[pos - 4 : pos].mean()
                 errors.append(values[pos] - prediction)
-            scale = float(np.sqrt(np.mean(np.square(errors)))) if errors else 1.0
+            calibration_errors = errors[-self.calibration_weeks :]
+            scale = float(np.sqrt(np.mean(np.square(calibration_errors)))) if calibration_errors else 1.0
             rows.append((category, region, max(1.0, scale)))
         scales = {(c, r): s for c, r, s in rows}
         global_scale = float(np.mean([s for _, _, s in rows])) if rows else 1.0
@@ -147,6 +208,8 @@ class PooledRidgeForecaster:
                         "region": region,
                         "forecast": prediction,
                         "error_scale": scales.get((category, region), global_scale),
+                        "uncertainty_source": "chronological_holdout",
+                        "selected_alpha": np.nan,
                         "method": method,
                     }
                 )
@@ -165,8 +228,20 @@ class PooledRidgeForecaster:
         return result.merge(actual, on=["target_week", "category", "region"], how="left")
 
 
-def generate_backtest_forecasts(panel: pd.DataFrame, backtest_weeks: int, horizon: int, alpha: float) -> pd.DataFrame:
-    forecaster = PooledRidgeForecaster(panel, alpha=alpha)
+def generate_backtest_forecasts(
+    panel: pd.DataFrame,
+    backtest_weeks: int,
+    horizon: int,
+    alpha: float,
+    alpha_grid: tuple[float, ...] | None = None,
+    calibration_weeks: int = 8,
+) -> pd.DataFrame:
+    forecaster = PooledRidgeForecaster(
+        panel,
+        alpha=alpha,
+        alpha_grid=alpha_grid,
+        calibration_weeks=calibration_weeks,
+    )
     evaluation_weeks = sorted(pd.to_datetime(panel["week"].unique()))[-backtest_weeks:]
     frames = []
     for origin in evaluation_weeks:
@@ -193,4 +268,3 @@ def forecast_metrics(forecasts: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows).sort_values(["horizon", "WAPE"])
-

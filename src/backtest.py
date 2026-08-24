@@ -46,12 +46,33 @@ def run_policy_backtest(
     network: dict[str, pd.DataFrame],
     settings: Settings,
     scenario: str = "base",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, pd.DataFrame]]:
     evaluation_weeks = sorted(pd.to_datetime(panel["week"].unique()))[-settings.backtest_weeks :]
     inventory = _opening_inventory(network)
     pipeline: dict[tuple[pd.Timestamp, str, str], float] = {}
     weekly_rows = []
     flow_frames = []
+    detail_frames: dict[str, list[pd.DataFrame]] = {
+        "replenishment_decisions": [],
+        "planned_fulfillment_flows": [],
+        "planned_inventory": [],
+        "planned_shortages": [],
+        "planned_service_gaps": [],
+        "actual_shortages": [],
+        "actual_service_gaps": [],
+        "inventory_positions": [],
+        "capacity_utilization": [],
+        "regional_service_results": [],
+    }
+
+    def add_context(name: str, frame: pd.DataFrame, origin_week: pd.Timestamp) -> None:
+        if frame.empty:
+            return
+        enriched_frame = frame.copy()
+        enriched_frame.insert(0, "origin_week", origin_week)
+        enriched_frame.insert(0, "policy", policy)
+        enriched_frame.insert(0, "scenario", scenario)
+        detail_frames[name].append(enriched_frame)
 
     for week in evaluation_weeks:
         week = pd.Timestamp(week)
@@ -68,6 +89,11 @@ def run_policy_backtest(
         ).clip(lower=0).map(math.ceil)
 
         plan = solve_inventory_plan(forecast, network, inventory, pipeline, settings)
+        add_context("replenishment_decisions", plan.values["replenishment_plan"], week)
+        add_context("planned_fulfillment_flows", plan.values["planned_flows"], week)
+        add_context("planned_inventory", plan.values["planned_inventory"], week)
+        add_context("planned_shortages", plan.values["planned_shortages"], week)
+        add_context("planned_service_gaps", plan.values["planned_service_gaps"], week)
         orders = plan.values["first_week_replenishment"]
         arrival_week = week + pd.Timedelta(weeks=settings.lead_time_weeks)
         for (hub, category), quantity in orders.items():
@@ -77,6 +103,16 @@ def run_policy_backtest(
         actual = panel[pd.to_datetime(panel["week"]) == week][["category", "region", "demand"]].copy()
         fulfillment = solve_actual_fulfillment(actual, network, inventory, settings)
         inventory = fulfillment.values["remaining_inventory"]
+        add_context("actual_shortages", fulfillment.values["shortages"], week)
+        add_context("actual_service_gaps", fulfillment.values["service_gaps"], week)
+        add_context("capacity_utilization", fulfillment.values["capacity_utilization"], week)
+        inventory_frame = pd.DataFrame(
+            [
+                {"hub": hub, "category": category, "ending_inventory": quantity}
+                for (hub, category), quantity in inventory.items()
+            ]
+        )
+        add_context("inventory_positions", inventory_frame, week)
         procurement_cost = _procurement_cost(orders, network)
         holding_cost = _holding_cost(inventory, network)
         late_exposure, supplier_exposure = _risk_exposure(fulfillment.values["flows"], network)
@@ -95,6 +131,8 @@ def run_policy_backtest(
                 "week": week,
                 "planning_status": plan.status,
                 "fulfillment_status": fulfillment.status,
+                "planning_solve_seconds": plan.values["solve_seconds"],
+                "fulfillment_solve_seconds": fulfillment.values["solve_seconds"],
                 "planned_objective": plan.objective,
                 "demand_units": fulfillment.values["total_demand"],
                 "fulfilled_units": fulfillment.values["fulfilled_units"],
@@ -120,9 +158,49 @@ def run_policy_backtest(
             flow.insert(0, "scenario", scenario)
             flow_frames.append(flow)
 
+        regional_demand = actual.groupby("region", observed=True)["demand"].sum().to_dict()
+        regional_shortage = fulfillment.values["shortages"].groupby("region", observed=True)["shortage_units"].sum().to_dict()
+        route_risk = fulfillment.values["flows"].copy()
+        if not route_risk.empty:
+            route_risk = route_risk.merge(
+                network["arcs"][["hub", "category", "region", "late_probability"]],
+                on=["hub", "category", "region"],
+                how="left",
+            ).merge(
+                network["hub_category"][["hub", "category", "supplier_risk"]],
+                on=["hub", "category"],
+                how="left",
+            )
+            route_risk["expected_late_units"] = route_risk["quantity"] * route_risk["late_probability"]
+            route_risk["supplier_risk_units"] = route_risk["quantity"] * route_risk["supplier_risk"]
+            risk_by_region = route_risk.groupby("region", observed=True)[
+                ["expected_late_units", "supplier_risk_units"]
+            ].sum()
+        else:
+            risk_by_region = pd.DataFrame()
+        regional_rows = []
+        for region, demand_units in regional_demand.items():
+            shortage_units = float(regional_shortage.get(region, 0.0))
+            regional_rows.append(
+                {
+                    "region": region,
+                    "demand_units": float(demand_units),
+                    "fulfilled_units": float(demand_units) - shortage_units,
+                    "shortage_units": shortage_units,
+                    "fill_rate": (float(demand_units) - shortage_units) / float(demand_units) if demand_units else 1.0,
+                    "expected_late_units": float(risk_by_region.loc[region, "expected_late_units"]) if region in risk_by_region.index else 0.0,
+                    "supplier_risk_units": float(risk_by_region.loc[region, "supplier_risk_units"]) if region in risk_by_region.index else 0.0,
+                }
+            )
+        add_context("regional_service_results", pd.DataFrame(regional_rows), week)
+
     weekly = pd.DataFrame(weekly_rows)
     flows = pd.concat(flow_frames, ignore_index=True) if flow_frames else pd.DataFrame()
-    return weekly, flows
+    details = {
+        name: pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        for name, frames in detail_frames.items()
+    }
+    return weekly, flows, details
 
 
 def summarize_policies(weekly: pd.DataFrame) -> pd.DataFrame:
@@ -153,4 +231,3 @@ def summarize_policies(weekly: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows).sort_values(["scenario", "total_cost"])
-

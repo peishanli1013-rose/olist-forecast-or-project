@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import pandas as pd
 import pulp
@@ -117,12 +118,87 @@ def solve_inventory_plan(
             )
 
     model += pulp.lpSum(procurement_terms + fulfillment_terms + holding_terms + shortage_terms + service_terms)
+    solve_start = time.perf_counter()
     model.solve(_solver(settings))
+    solve_seconds = time.perf_counter() - solve_start
     status = pulp.LpStatus[model.status]
     if status not in {"Optimal", "Feasible"}:
         raise RuntimeError(f"Inventory planning model failed with status {status}")
     q0 = {(hub, category): float(q[hub][category][0].value() or 0.0) for hub in hubs for category in categories}
-    return SolveResult(status=status, objective=float(pulp.value(model.objective)), values={"first_week_replenishment": q0})
+    replenishment_rows = []
+    flow_rows = []
+    inventory_rows = []
+    shortage_rows = []
+    service_rows = []
+    for hub in hubs:
+        for category in categories:
+            for t, week in enumerate(weeks):
+                replenishment_rows.append(
+                    {
+                        "target_week": week,
+                        "horizon": t + 1,
+                        "hub": hub,
+                        "category": category,
+                        "quantity": float(q[hub][category][t].value() or 0.0),
+                    }
+                )
+                inventory_rows.append(
+                    {
+                        "target_week": week,
+                        "horizon": t + 1,
+                        "hub": hub,
+                        "category": category,
+                        "ending_inventory": float(inventory[hub][category][t].value() or 0.0),
+                    }
+                )
+                for region in regions:
+                    quantity = float(x[hub][category][region][t].value() or 0.0)
+                    if quantity > 0:
+                        flow_rows.append(
+                            {
+                                "target_week": week,
+                                "horizon": t + 1,
+                                "hub": hub,
+                                "category": category,
+                                "region": region,
+                                "quantity": quantity,
+                            }
+                        )
+    for category in categories:
+        for region in regions:
+            for t, week in enumerate(weeks):
+                shortage_rows.append(
+                    {
+                        "target_week": week,
+                        "horizon": t + 1,
+                        "category": category,
+                        "region": region,
+                        "planned_shortage": float(shortage[category][region][t].value() or 0.0),
+                    }
+                )
+    for region in regions:
+        for t, week in enumerate(weeks):
+            service_rows.append(
+                {
+                    "target_week": week,
+                    "horizon": t + 1,
+                    "region": region,
+                    "service_gap": float(service_gap[region][t].value() or 0.0),
+                }
+            )
+    return SolveResult(
+        status=status,
+        objective=float(pulp.value(model.objective)),
+        values={
+            "first_week_replenishment": q0,
+            "replenishment_plan": pd.DataFrame(replenishment_rows),
+            "planned_flows": pd.DataFrame(flow_rows),
+            "planned_inventory": pd.DataFrame(inventory_rows),
+            "planned_shortages": pd.DataFrame(shortage_rows),
+            "planned_service_gaps": pd.DataFrame(service_rows),
+            "solve_seconds": solve_seconds,
+        },
+    )
 
 
 def solve_actual_fulfillment(
@@ -186,7 +262,9 @@ def solve_actual_fulfillment(
         service_terms.append(average_shortage_cost * settings.service_gap_penalty_multiplier * service_gap[region])
 
     model += pulp.lpSum(shipping_terms + risk_terms + shortage_terms + service_terms)
+    solve_start = time.perf_counter()
     model.solve(_solver(settings))
+    solve_seconds = time.perf_counter() - solve_start
     status = pulp.LpStatus[model.status]
     if status not in {"Optimal", "Feasible"}:
         raise RuntimeError(f"Fulfillment model failed with status {status}")
@@ -205,6 +283,35 @@ def solve_actual_fulfillment(
 
     total_demand = float(sum(demand.values()))
     total_shortage = float(sum(shortage[category][region].value() or 0.0 for category in categories for region in regions))
+    shortage_rows = [
+        {
+            "category": category,
+            "region": region,
+            "shortage_units": float(shortage[category][region].value() or 0.0),
+        }
+        for category in categories
+        for region in regions
+    ]
+    service_rows = [
+        {"region": region, "service_gap": float(service_gap[region].value() or 0.0)}
+        for region in regions
+    ]
+    capacity_rows = []
+    for hub in hubs:
+        used_kg = sum(
+            float(hc.loc[(hub, category), "weight_kg"])
+            * float(x[hub][category][region].value() or 0.0)
+            for category in categories
+            for region in regions
+        )
+        capacity_rows.append(
+            {
+                "hub": hub,
+                "used_capacity_kg": used_kg,
+                "available_capacity_kg": float(capacity[hub]),
+                "capacity_utilization": used_kg / float(capacity[hub]) if float(capacity[hub]) else 0.0,
+            }
+        )
     values = {
         "flows": pd.DataFrame(flow_rows),
         "remaining_inventory": remaining,
@@ -216,6 +323,9 @@ def solve_actual_fulfillment(
         "risk_cost": float(sum(pulp.value(term) or 0.0 for term in risk_terms)),
         "shortage_cost": float(sum(pulp.value(term) or 0.0 for term in shortage_terms)),
         "service_gap_cost": float(sum(pulp.value(term) or 0.0 for term in service_terms)),
+        "shortages": pd.DataFrame(shortage_rows),
+        "service_gaps": pd.DataFrame(service_rows),
+        "capacity_utilization": pd.DataFrame(capacity_rows),
+        "solve_seconds": solve_seconds,
     }
     return SolveResult(status=status, objective=float(pulp.value(model.objective)), values=values)
-

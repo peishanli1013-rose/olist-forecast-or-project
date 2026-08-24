@@ -2,52 +2,42 @@
 
 [English README](README.md)
 
-本项目使用巴西 Olist 电商公开数据，构建了一个可复现的 **需求预测 → 库存计划 → 履约分配 → 滚动更新** 实验框架。项目不仅比较预测模型的统计精度，还研究不同预测方法如何影响后续的库存成本、缺货、履约率和配送风险。
+本项目基于巴西 Olist 电商公开数据，构建了可复现的 **描述分析 → 需求预测 → 库存计划 → 实际履约 → 滚动更新** 实验。研究重点不是单纯求解一个数学模型，而是先从历史订单中发现需求和履约风险规律，再检验这些信息能否改善后续库存与履约决策。
 
-## 研究目标
+## 核心研究问题
 
-本项目希望回答：需求预测及其误差信息能否改善电商企业的库存补货与履约分配决策？为此，我们在相同的运筹优化模型和成本假设下比较多种预测策略，并同时评价预测准确性和实际运营表现。
+1. 不同商品品类、客户地区和卖家路线的需求规律与历史履约风险有何差异？
+2. Pooled Ridge 是否优于简单预测基准，并且在哪些品类—地区组合中更有效？
+3. 预测驱动的补货和履约决策能否在维持地区服务水平的同时降低模拟成本？
 
-## 项目主要内容
+## 项目流程
 
-1. 合并订单、订单明细、商品、品类翻译、客户和卖家数据。
-2. 构建包含零需求周的 50 条周度需求序列：10 个商品品类 × 5 个巴西地区。
-3. 使用时间顺序验证比较上一周预测、四周移动平均和 pooled Ridge 模型。
-4. 根据历史订单估计卖家延迟发货风险、配送延迟风险以及订单批准到承运商接收的提前期代理变量。
-5. 将需求预测和历史预测误差输入六个模拟履约中心的库存补货与配置模型。
-6. 在实际需求揭示后，使用可用库存求解带容量约束的履约分配模型。
-7. 进行 13 周滚动历史回测，比较总成本、履约率、缺货量、期末库存和预期延迟量。
+1. 合并订单、订单商品、商品、品类翻译、客户和卖家数据。
+2. 构建 10 个主要品类 × 5 个巴西地区的 50 条零需求周完整序列。
+3. 分析需求集中度、波动、稀疏程度、趋势和路线履约风险。
+4. 使用时间顺序验证比较上一周、四周移动平均和 pooled Ridge。
+5. 使用过去八周留出误差统一估计三种方法的不确定性，并在每个预测起点从 `{1, 5, 25, 100}` 中选择 Ridge 正则化强度。
+6. 将预测和历史误差输入四周多期库存补货 MILP。
+7. 实际需求出现后，求解带库存和仓库容量约束的运输／履约 MILP。
+8. 进行 13 周滚动历史回测，导出补货、计划流量、实际履约、缺货、库存、地区服务和容量利用率。
+9. 对安全库存、补货提前期、缺货成本、服务目标、仓库容量和风险权重进行敏感性分析。
 
-建模窗口包含从 2017-01-02 到 2018-08-20 的 86 个完整周。由于 2018-08-27 开始的一周数据不完整，因此未纳入建模。
+研究窗口为 2017-01-02 至 2018-08-20，共 86 个完整周；不完整的 2018-08-27 周被排除。
 
-## 重要说明
+## 主要结果
 
-Olist 数据没有提供真实仓库位置、历史库存、采购合同或企业实际补货决策。需求、卖家和客户地理位置、运费及服务时间来自原始数据；六个代理履约中心、初始库存、仓库容量、采购成本和补货规则属于透明记录的情景假设，并通过敏感性分析检验。因此，本项目不声称重建 Olist 的真实仓储网络。
+- Ridge 的一步 WAPE 为 **30.94%**，优于移动平均的 34.12% 和上一周方法的 34.74%。
+- 在 50 个品类—地区序列中，Ridge 在 26 个序列中取得最佳一步 WAPE，移动平均为 23 个，上一周方法为 1 个。
+- Ridge 策略的基准模拟成本最低，为 **996,695.41**，履约率为 **94.01%**。
+- 移动平均履约率略高，为 94.26%，但补货更多、期末库存更高。
+- 不使用安全缓冲时履约率下降至 86.03%；使用一个完整误差尺度时履约率提高至 98.82%。
+- 补货提前期从一周增加到两周后，缺货上升至 1,187 件，总成本上升至 1,091,625.68。
+- 仓库重量容量上下调整 20% 没有改变解，说明该容量在当前情景中不是主要瓶颈。
+- North 和 Northeast 的地区履约率最低，说明最低服务约束中的惩罚松弛变量需要与地区结果共同解释。
 
-## 仓库结构
+## 数据来源与边界
 
-```text
-.
-├── docs/                 # 最终项目 proposal
-├── outputs/
-│   ├── data/             # 派生数据和履约网络参数
-│   ├── figures/          # 可用于展示的结果图
-│   ├── tables/           # 预测、回测和优化结果
-│   └── RESULTS_SUMMARY.md
-├── src/                  # 数据、预测、优化、验证和报告代码
-├── DATA_DICTIONARY.md
-├── MODEL.md
-├── PROJECT_STATUS.md
-├── requirements.txt
-├── setup_project.command
-└── run_project.command
-```
-
-## 原始数据准备
-
-请单独下载 Brazilian E-Commerce Public Dataset by Olist。为了控制仓库大小，原始 CSV 文件不上传至本仓库。
-
-需要以下文件：
+实际使用六个 Olist 文件：
 
 - `olist_orders_dataset.csv`
 - `olist_order_items_dataset.csv`
@@ -56,52 +46,61 @@ Olist 数据没有提供真实仓库位置、历史库存、采购合同或企�
 - `olist_customers_dataset.csv`
 - `olist_sellers_dataset.csv`
 
-程序可以通过以下任一方式定位数据：
+Payments、reviews 和 geolocation 未用于核心模型。
 
-1. 运行时传入 `--data-dir /path/to/olist/csvs`。
-2. 设置环境变量 `OLIST_DATA_DIR`。
-3. 将数据放在项目同级的 `archive` 或 `data` 文件夹。
+Olist 没有提供真实仓库、历史库存、采购合同和实际补货决策。需求、卖家和客户地理位置、价格、运费、交付时间以及平滑历史履约风险来自 Olist；六个代理履约中心、初始库存、仓库容量、采购成本、补货提前期和成本惩罚是透明的研究情景。
+
+订单批准到卖家交给承运商的时间只被解释为历史履约时间代理变量，不被表述为 Olist 的采购提前期。模型总成本是基于 Olist 价格与运费尺度构造的模拟成本，不是 Olist 的真实财务支出。
 
 ## 运行方法
 
-macOS 用户可以先运行一次 `setup_project.command` 创建 Python 环境，再运行 `run_project.command` 重新生成结果。
+原始 CSV 不上传 GitHub。可以通过以下任一方式指定数据：
 
-也可以在项目根目录运行：
+1. 运行时传入 `--data-dir /path/to/olist/csvs`；
+2. 设置 `OLIST_DATA_DIR`；
+3. 将数据放在项目同级 `archive` 或项目内 `data/raw`。
+
+运行完整项目：
 
 ```bash
 python -m src.run_all --data-dir /path/to/olist/csvs
 ```
 
-快速验证模式（跳过敏感性分析）：
+跳过敏感性分析的快速验证：
 
 ```bash
 python -m src.run_all --data-dir /path/to/olist/csvs --quick
 ```
 
-依赖包记录在 `requirements.txt` 中，运筹优化使用 PuLP 自带的 CBC 求解器。
+macOS 也可以先运行一次 `setup_project.command`，之后运行 `run_project.command`。
 
-## 主要输出
+## 关键结果文件
 
-- `outputs/data/weekly_demand_panel.csv`：50 条平衡周度需求序列。
-- `outputs/data/network/`：由历史数据估计的风险、运费代理变量及情景参数。
-- `outputs/tables/forecast_predictions.csv`：各预测起点和预测期的预测结果。
-- `outputs/tables/forecast_metrics.csv`：WAPE、MAE 和 Bias。
-- `outputs/tables/weekly_policy_results.csv`：每周实际运营和成本结果。
-- `outputs/tables/policy_summary.csv`：策略对比及敏感性分析结果。
-- `outputs/figures/`：需求、预测、成本、履约率和敏感性分析图表。
-- `outputs/RESULTS_SUMMARY.md`：主要发现、解释和局限。
+### 数据挖掘
 
-## 已验证的项目范围
+- `outputs/tables/demand_segment_summary.csv`：需求规模、波动、零需求率和趋势。
+- `outputs/tables/fulfillment_risk_ranking.csv`：路线样本量、运费、延迟率和风险成本。
+- `outputs/tables/forecast_segment_metrics.csv`：50 个细分序列的预测表现。
+- `outputs/tables/regional_service_summary.csv`：地区需求、缺货、履约率和延迟风险。
 
-- 112,643 条有效主状态订单商品记录。
-- 86 个完整周度周期。
-- 50 条品类—地区需求序列，共 4,300 条平衡面板记录。
-- 四周库存计划模型，以及实际需求揭示后的履约分配模型。
-- 13 周滚动历史回测。
-- 自动验证需求汇总、成本核算、库存平衡、求解器状态和结果一致性。
+### 预测与策略结果
 
-核心项目未使用 SKU 级深度学习、随机规划或车辆路径规划，也不将模拟仓库和成本参数表述为 Olist 的真实经营数据。
+- `outputs/tables/forecast_predictions.csv`
+- `outputs/tables/forecast_metrics.csv`
+- `outputs/tables/weekly_policy_results.csv`
+- `outputs/tables/policy_summary.csv`
 
-## Proposal
+### OR 详细决策
+
+- `outputs/tables/replenishment_decisions.csv`
+- `outputs/tables/planned_fulfillment_flows.csv`
+- `outputs/tables/planned_inventory.csv`
+- `outputs/tables/planned_shortages.csv`
+- `outputs/tables/actual_shortages.csv`
+- `outputs/tables/inventory_positions.csv`
+- `outputs/tables/capacity_utilization.csv`
+- `outputs/tables/regional_service_results.csv`
+
+所有参数的来源和选择理由记录在 `outputs/data/network/metadata.csv`。当前完整运行已经通过预测时间顺序、需求与成本核算、库存平衡、容量可行性、地区服务汇总、详细决策对账、求解状态和敏感性情景完整性检查。
 
 最终 proposal 位于 [`docs/Olist_Forecast_OR_Project_Proposal.docx`](docs/Olist_Forecast_OR_Project_Proposal.docx)。

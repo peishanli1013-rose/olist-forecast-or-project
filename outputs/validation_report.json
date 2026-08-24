@@ -7,6 +7,8 @@
     "panel_demand_nonnegative_integer": true,
     "forecast_methods_complete": true,
     "forecasts_nonnegative": true,
+    "forecast_uncertainty_is_positive_and_chronological": true,
+    "planning_demand_nonnegative_integer": true,
     "forecast_origins_13": true,
     "demand_accounting": true,
     "cost_accounting": true,
@@ -14,6 +16,17 @@
     "fill_rate_in_unit_interval": true,
     "all_solver_statuses_optimal": true,
     "base_policies_13_weeks_each": true,
+    "demand_insight_table_has_50_segments": true,
+    "forecast_segment_table_is_complete": true,
+    "risk_ranking_has_evidence_and_smoothed_rates": true,
+    "parameter_sources_and_rationales_are_documented": true,
+    "regional_service_reconciles_to_policy_totals": true,
+    "replenishment_details_reconcile": true,
+    "shortage_details_reconcile": true,
+    "inventory_details_reconcile": true,
+    "capacity_utilization_within_limits": true,
+    "solver_times_nonnegative": true,
+    "promised_sensitivity_scenarios_complete_or_skipped": true,
     "summary_matches_weekly_cost": true
   }
 }

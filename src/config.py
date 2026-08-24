@@ -47,6 +47,8 @@ class Settings:
     planning_horizon: int = 4
     backtest_weeks: int = 13
     ridge_alpha: float = 25.0
+    ridge_alpha_grid: tuple[float, ...] = (1.0, 5.0, 25.0, 100.0)
+    uncertainty_calibration_weeks: int = 8
     safety_z: float = 0.50
     service_target: float = 0.90
     lead_time_weeks: int = 1

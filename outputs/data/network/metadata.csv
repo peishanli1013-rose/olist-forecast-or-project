@@ -1,7 +1,19 @@
-parameter,value,source
-candidate_hubs,"SP, PR, MG, RJ, SC, RS",top seller states by selected-category volume
-global_late_dispatch_rate,0.08782505390064681,Olist observed
-global_late_delivery_rate,0.08075170335624267,Olist observed
-global_median_freight,16.11,Olist observed
-lead_time_weeks,1,planning scenario
-opening_weeks_cover,2.0,planning scenario
+parameter,value,source,rationale
+candidate_hubs,"SP, PR, MG, RJ, SC, RS",Olist-derived proxy,Six highest-volume seller states retain the dominant supply origins while keeping the MILP compact.
+global_late_dispatch_rate,0.08782505390064681,Olist observed,Fallback prior for sparse seller-category groups.
+global_late_delivery_rate,0.08075170335624267,Olist observed,Fallback prior for sparse hub-category-region routes.
+global_median_freight,16.11,Olist observed,Robust fallback when a route has no retained historical freight observation.
+planning_horizon_weeks,4,planning scenario,Four weeks permits multi-period replenishment while limiting recursive forecast error.
+lead_time_weeks,1,planning scenario,One week is the smallest positive lead time in a weekly model; a two-week alternative is tested.
+opening_weeks_cover,2.0,planning scenario,Two weeks provides a neutral warm-start inventory and is allocated by historical supply share.
+capacity_multiplier,1.35,planning scenario,Historical weekly shipped-weight P90 plus 35% headroom; plus/minus 20% is sensitivity-tested.
+replenishment_multiplier,1.5,planning scenario,Historical weekly unit P90 plus 50% surge allowance prevents unlimited replenishment.
+procurement_share_of_price,0.6,planning scenario,Transparent cost proxy because Olist does not report procurement contracts.
+holding_rate_per_week,0.01,planning scenario,Short-horizon carrying-cost proxy applied consistently to category median price.
+shortage_value_multiplier,1.25,planning scenario,Values lost margin and service impact above procurement cost; low and high alternatives are tested.
+service_target,0.9,planning scenario,A 90% regional target is compared with 85% and 95% targets.
+safety_z,0.5,forecast policy,Half of chronological holdout RMSE is a middle policy between zero and one full error scale.
+late_penalty_per_expected_unit,8.0,planning scenario,Converts smoothed late-delivery probability into a transparent expected penalty; zero and double weights are tested.
+supplier_risk_penalty_per_expected_unit,5.0,planning scenario,Separately prices late-dispatch exposure; zero and double weights are tested.
+ridge_alpha_grid,"1.0, 5.0, 25.0, 100.0",chronological model selection,Alpha is selected at each forecast origin using an eight-week historical holdout rather than fixed after seeing test results.
+uncertainty_calibration_weeks,8,chronological model validation,Recent eight-week holdout balances recency with enough residual observations per series.

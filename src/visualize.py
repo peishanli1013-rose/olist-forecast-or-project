@@ -18,6 +18,10 @@ def create_figures(
     weekly: pd.DataFrame,
     summary: pd.DataFrame,
     sensitivity: pd.DataFrame,
+    demand_summary: pd.DataFrame,
+    segment_metrics: pd.DataFrame,
+    risk_ranking: pd.DataFrame,
+    regional_summary: pd.DataFrame,
     output_dir: Path,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -87,3 +91,44 @@ def create_figures(
         fig.tight_layout()
         fig.savefig(output_dir / "06_sensitivity.png", dpi=180)
         plt.close(fig)
+
+    demand_heatmap = demand_summary.pivot(index="category", columns="region", values="total_demand")
+    fig, ax = plt.subplots(figsize=(9.5, 6.2))
+    sns.heatmap(demand_heatmap, cmap="Blues", annot=True, fmt=".0f", linewidths=0.4, ax=ax)
+    ax.set(title="Demand Concentration by Product Category and Customer Region", xlabel="Customer region", ylabel="Product category")
+    fig.tight_layout()
+    fig.savefig(output_dir / "07_demand_concentration_heatmap.png", dpi=180)
+    plt.close(fig)
+
+    winners = segment_metrics[segment_metrics["is_best_wape"]].groupby("method").size().reindex(
+        ["last_week", "moving_average", "ridge"], fill_value=0
+    )
+    fig, ax = plt.subplots(figsize=(7.5, 4.8))
+    ax.bar(winners.index, winners.values, color=[COLORS.get(x, "#4B5563") for x in winners.index])
+    ax.set(title="Best One-Week Forecast by Category-Region Segment", xlabel="Forecast method", ylabel="Number of winning segments")
+    fig.tight_layout()
+    fig.savefig(output_dir / "08_forecast_segment_winners.png", dpi=180)
+    plt.close(fig)
+
+    risk_plot = risk_ranking[risk_ranking["sample_size"] >= 30].head(12).copy()
+    if not risk_plot.empty:
+        risk_plot["route"] = risk_plot["hub"] + " / " + risk_plot["category"] + " / " + risk_plot["region"]
+        risk_plot = risk_plot.sort_values("expected_risk_cost_per_unit")
+        fig, ax = plt.subplots(figsize=(10.5, 6.2))
+        ax.barh(risk_plot["route"], risk_plot["expected_risk_cost_per_unit"], color="#C2410C")
+        ax.set(title="Highest Historical Fulfillment-Risk Routes (n >= 30)", xlabel="Expected risk penalty per fulfilled unit", ylabel="")
+        fig.tight_layout()
+        fig.savefig(output_dir / "09_fulfillment_risk_routes.png", dpi=180)
+        plt.close(fig)
+
+    regional_plot = regional_summary.pivot(index="region", columns="policy", values="fill_rate")
+    regional_plot = regional_plot.reindex(columns=["last_week", "moving_average", "ridge"])
+    fig, ax = plt.subplots(figsize=(9.2, 5.2))
+    regional_plot.plot(kind="bar", ax=ax, color=[COLORS.get(x, "#4B5563") for x in regional_plot.columns])
+    ax.axhline(0.90, color="#B91C1C", linestyle="--", linewidth=1.5, label="90% target")
+    ax.set(title="Regional Fill Rate by Forecast-Driven Policy", xlabel="Customer region", ylabel="Fill rate")
+    ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output_dir / "10_regional_fill_rate.png", dpi=180)
+    plt.close(fig)

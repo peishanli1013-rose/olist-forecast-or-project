@@ -140,12 +140,24 @@ def build_network(enriched: pd.DataFrame, panel: pd.DataFrame, settings: Setting
     arcs = pd.DataFrame(arc_rows)
     metadata = pd.DataFrame(
         [
-            {"parameter": "candidate_hubs", "value": ", ".join(hubs), "source": "top seller states by selected-category volume"},
-            {"parameter": "global_late_dispatch_rate", "value": global_dispatch, "source": "Olist observed"},
-            {"parameter": "global_late_delivery_rate", "value": global_delivery, "source": "Olist observed"},
-            {"parameter": "global_median_freight", "value": global_freight, "source": "Olist observed"},
-            {"parameter": "lead_time_weeks", "value": settings.lead_time_weeks, "source": "planning scenario"},
-            {"parameter": "opening_weeks_cover", "value": settings.opening_weeks_cover, "source": "planning scenario"},
+            {"parameter": "candidate_hubs", "value": ", ".join(hubs), "source": "Olist-derived proxy", "rationale": "Six highest-volume seller states retain the dominant supply origins while keeping the MILP compact."},
+            {"parameter": "global_late_dispatch_rate", "value": global_dispatch, "source": "Olist observed", "rationale": "Fallback prior for sparse seller-category groups."},
+            {"parameter": "global_late_delivery_rate", "value": global_delivery, "source": "Olist observed", "rationale": "Fallback prior for sparse hub-category-region routes."},
+            {"parameter": "global_median_freight", "value": global_freight, "source": "Olist observed", "rationale": "Robust fallback when a route has no retained historical freight observation."},
+            {"parameter": "planning_horizon_weeks", "value": settings.planning_horizon, "source": "planning scenario", "rationale": "Four weeks permits multi-period replenishment while limiting recursive forecast error."},
+            {"parameter": "lead_time_weeks", "value": settings.lead_time_weeks, "source": "planning scenario", "rationale": "One week is the smallest positive lead time in a weekly model; a two-week alternative is tested."},
+            {"parameter": "opening_weeks_cover", "value": settings.opening_weeks_cover, "source": "planning scenario", "rationale": "Two weeks provides a neutral warm-start inventory and is allocated by historical supply share."},
+            {"parameter": "capacity_multiplier", "value": settings.capacity_multiplier, "source": "planning scenario", "rationale": "Historical weekly shipped-weight P90 plus 35% headroom; plus/minus 20% is sensitivity-tested."},
+            {"parameter": "replenishment_multiplier", "value": settings.replenishment_multiplier, "source": "planning scenario", "rationale": "Historical weekly unit P90 plus 50% surge allowance prevents unlimited replenishment."},
+            {"parameter": "procurement_share_of_price", "value": settings.procurement_share_of_price, "source": "planning scenario", "rationale": "Transparent cost proxy because Olist does not report procurement contracts."},
+            {"parameter": "holding_rate_per_week", "value": settings.holding_rate_per_week, "source": "planning scenario", "rationale": "Short-horizon carrying-cost proxy applied consistently to category median price."},
+            {"parameter": "shortage_value_multiplier", "value": settings.shortage_value_multiplier, "source": "planning scenario", "rationale": "Values lost margin and service impact above procurement cost; low and high alternatives are tested."},
+            {"parameter": "service_target", "value": settings.service_target, "source": "planning scenario", "rationale": "A 90% regional target is compared with 85% and 95% targets."},
+            {"parameter": "safety_z", "value": settings.safety_z, "source": "forecast policy", "rationale": "Half of chronological holdout RMSE is a middle policy between zero and one full error scale."},
+            {"parameter": "late_penalty_per_expected_unit", "value": settings.late_penalty_per_expected_unit, "source": "planning scenario", "rationale": "Converts smoothed late-delivery probability into a transparent expected penalty; zero and double weights are tested."},
+            {"parameter": "supplier_risk_penalty_per_expected_unit", "value": settings.supplier_risk_penalty_per_expected_unit, "source": "planning scenario", "rationale": "Separately prices late-dispatch exposure; zero and double weights are tested."},
+            {"parameter": "ridge_alpha_grid", "value": ", ".join(map(str, settings.ridge_alpha_grid)), "source": "chronological model selection", "rationale": "Alpha is selected at each forecast origin using an eight-week historical holdout rather than fixed after seeing test results."},
+            {"parameter": "uncertainty_calibration_weeks", "value": settings.uncertainty_calibration_weeks, "source": "chronological model validation", "rationale": "Recent eight-week holdout balances recency with enough residual observations per series."},
         ]
     )
     return {"hub_category": hub_category, "arcs": arcs, "capacity": capacity, "metadata": metadata}
@@ -155,4 +167,3 @@ def save_network(network: dict[str, pd.DataFrame], output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in network.items():
         frame.to_csv(output_dir / f"{name}.csv", index=False)
-
