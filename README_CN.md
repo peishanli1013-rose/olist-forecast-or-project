@@ -4,6 +4,22 @@
 
 本项目基于巴西 Olist 电商公开数据，构建了可复现的 **描述分析 → 需求预测 → 库存计划 → 实际履约 → 滚动更新** 实验。研究重点不是单纯求解一个数学模型，而是先从历史订单中发现需求和履约风险规律，再检验这些信息能否改善后续库存与履约决策。
 
+## 交互式结果网站（MVP）
+
+在线访问：[Olist OR Lab](https://olist-forecast-or-lab.peishanli1013.chatgpt.site)
+
+[`site/`](site/) 提供完整源码。网站包含 Overview、Demand、Forecast、Optimization 和 Sensitivity 五个模块。敏感性页面可切换安全缓冲、提前期、服务目标、容量、风险权重和缺货价值，但只显示已经由 MILP 实际求解的 11 个情景，不对未求解的参数组合进行插值。
+
+本地启动网站：
+
+```bash
+cd site
+npm install
+npm run dev
+```
+
+然后在浏览器打开 `http://localhost:3000`。使用 `npm test` 可重新检查正式构建、首页内容和分享元数据。
+
 ## 核心研究问题
 
 1. 不同商品品类、客户地区和卖家路线的需求规律与历史履约风险有何差异？

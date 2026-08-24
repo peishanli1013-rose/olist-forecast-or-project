@@ -4,6 +4,20 @@
 
 This project implements a reproducible **describe → forecast → plan → fulfill → update** experiment using the Brazilian E-Commerce Public Dataset by Olist. It responds to the central research question: can forecast-driven replenishment and fulfillment decisions reduce simulated cost while maintaining regional service?
 
+## Interactive results MVP
+
+Live site: [Olist OR Lab](https://olist-forecast-or-lab.peishanli1013.chatgpt.site)
+
+[`site/`](site/) contains the complete source for the English interactive website. It has Overview, Demand, Forecast, Optimization, and Sensitivity sections. Its controls expose eleven scenarios already solved by the MILP across safety buffer, lead time, service target, capacity, risk weights, and shortage value. The interface does not interpolate unsolved parameter combinations.
+
+```bash
+cd site
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. Run `npm test` to verify the production build, rendered content, and social metadata.
+
 ## Research questions
 
 1. How do weekly demand patterns and historical fulfillment risks differ across product categories, customer regions, and seller-origin routes?
@@ -52,6 +66,7 @@ The approval-to-carrier measure is a historical fulfillment proxy, not Olist's p
 │   ├── tables/           # Aggregate and detailed model outputs
 │   └── RESULTS_SUMMARY.md
 ├── src/                  # Analysis, forecasting, optimization, validation, and reporting code
+├── site/                 # Interactive results and sensitivity MVP
 ├── DATA_DICTIONARY.md
 ├── MODEL.md
 ├── PROJECT_STATUS.md
