@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render(pathname = "/") {
@@ -49,4 +50,14 @@ test("emits complete absolute social metadata", async () => {
   assert.match(html, /property="og:image" content="https:\/\/olist-or\.example\/og\.png"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.match(html, /name="twitter:image" content="https:\/\/olist-or\.example\/og\.png"/);
+});
+
+test("includes the interactive what-if controls and model boundary", async () => {
+  const dashboard = await readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8");
+  assert.match(dashboard, /Live what-if/);
+  assert.match(dashboard, /Calibrated instant estimate/);
+  assert.match(dashboard, /validate with MILP before final reporting/);
+  assert.match(dashboard, /type="range"/);
+  assert.equal((dashboard.match(/type="range"/g) ?? []).length, 1);
+  assert.match(dashboard, /inputControls\.map/);
 });

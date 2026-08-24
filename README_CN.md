@@ -8,7 +8,7 @@
 
 在线访问：[Olist OR Lab](https://olist-forecast-or-lab.peishanli1013.chatgpt.site)
 
-[`site/`](site/) 提供完整源码。网站包含 Overview、Demand、Forecast、Optimization 和 Sensitivity 五个模块。敏感性页面可切换安全缓冲、提前期、服务目标、容量、风险权重和缺货价值，但只显示已经由 MILP 实际求解的 11 个情景，不对未求解的参数组合进行插值。
+[`site/`](site/) 提供完整源码。网站包含 Overview、Demand、Forecast、Optimization 和 Sensitivity 五个模块。敏感性页面现在提供两种模式：**Verified Runs** 精确展示已经求解的单因素 MILP 情景；**Live What-if** 允许同时调整安全缓冲、提前期、服务目标、容量、风险权重和缺货价值，并即时更新结果。组合情景采用由已求解锚点校准的分段线性加总估算，页面会明确标注为 estimate；只有参数与已求解情景完全一致时才显示 solver-verified。
 
 本地启动网站：
 

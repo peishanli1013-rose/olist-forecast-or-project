@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 type Page = "overview" | "demand" | "forecast" | "optimization" | "sensitivity";
+type LabMode = "verified" | "live";
 
 type Scenario = {
   id: string;
@@ -11,6 +12,28 @@ type Scenario = {
   shortage: number;
   inventory: number;
   note: string;
+};
+
+type WhatIfInputs = {
+  safety: number;
+  lead: number;
+  service: number;
+  capacity: number;
+  risk: number;
+  shortageValue: number;
+};
+
+type MetricKey = "cost" | "fill" | "shortage" | "inventory";
+type InputKey = keyof WhatIfInputs;
+type InputControl = {
+  key: InputKey;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  suffix: string;
+  low?: { value: number; scenario: string };
+  high?: { value: number; scenario: string };
 };
 
 const forecastRows = [
@@ -74,8 +97,69 @@ const scenarioGroups = [
   { id: "shortage", label: "Shortage value", options: [["shortage_low", "Low"], ["base", "Base"], ["shortage_high", "High"]] },
 ] as const;
 
+const baseInputs: WhatIfInputs = {
+  safety: 0.5,
+  lead: 1,
+  service: 90,
+  capacity: 100,
+  risk: 1,
+  shortageValue: 1.25,
+};
+
+const exactInputs: Record<string, WhatIfInputs> = {
+  base: baseInputs,
+  safety_0: { ...baseInputs, safety: 0 },
+  safety_1: { ...baseInputs, safety: 1 },
+  lead_time_2: { ...baseInputs, lead: 2 },
+  service_85: { ...baseInputs, service: 85 },
+  service_95: { ...baseInputs, service: 95 },
+  capacity_80: { ...baseInputs, capacity: 80 },
+  capacity_120: { ...baseInputs, capacity: 120 },
+  risk_0: { ...baseInputs, risk: 0 },
+  risk_2x: { ...baseInputs, risk: 2 },
+  shortage_low: { ...baseInputs, shortageValue: 0.8 },
+  shortage_high: { ...baseInputs, shortageValue: 2 },
+};
+
+const inputControls: readonly InputControl[] = [
+  { key: "safety", label: "Safety buffer", min: 0, max: 1, step: 0.05, suffix: "×", low: { value: 0, scenario: "safety_0" }, high: { value: 1, scenario: "safety_1" } },
+  { key: "lead", label: "Effective lead time", min: 1, max: 2, step: 0.1, suffix: " weeks", high: { value: 2, scenario: "lead_time_2" } },
+  { key: "service", label: "Regional service target", min: 85, max: 95, step: 1, suffix: "%", low: { value: 85, scenario: "service_85" }, high: { value: 95, scenario: "service_95" } },
+  { key: "capacity", label: "Weight capacity", min: 80, max: 120, step: 5, suffix: "%", low: { value: 80, scenario: "capacity_80" }, high: { value: 120, scenario: "capacity_120" } },
+  { key: "risk", label: "Route-risk weight", min: 0, max: 2, step: 0.1, suffix: "×", low: { value: 0, scenario: "risk_0" }, high: { value: 2, scenario: "risk_2x" } },
+  { key: "shortageValue", label: "Shortage value", min: 0.8, max: 2, step: 0.05, suffix: "×", low: { value: 0.8, scenario: "shortage_low" }, high: { value: 2, scenario: "shortage_high" } },
+];
+
 const money = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const signed = (value: number, digits = 1) => `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+const closeEnough = (a: number, b: number) => Math.abs(a - b) < 0.0001;
+
+function exactScenarioFor(inputs: WhatIfInputs) {
+  const keys = Object.keys(baseInputs) as (keyof WhatIfInputs)[];
+  return Object.entries(exactInputs).find(([, values]) => keys.every((key) => closeEnough(inputs[key], values[key])))?.[0] ?? null;
+}
+
+function estimateScenario(inputs: WhatIfInputs): Scenario {
+  const result: Scenario = { ...scenarios.base, id: "live_estimate", note: "Instant additive response-surface estimate calibrated to the eleven one-factor MILP runs." };
+  const metrics: MetricKey[] = ["cost", "fill", "shortage", "inventory"];
+
+  for (const control of inputControls) {
+    const value = inputs[control.key];
+    const baseValue = baseInputs[control.key];
+    const anchor = value < baseValue ? control.low : control.high;
+    if (!anchor || closeEnough(value, baseValue)) continue;
+    const ratio = (value - baseValue) / (anchor.value - baseValue);
+    for (const metric of metrics) {
+      result[metric] += ratio * (scenarios[anchor.scenario][metric] - scenarios.base[metric]);
+    }
+  }
+
+  result.cost = Math.max(0, result.cost);
+  result.fill = Math.min(100, Math.max(0, result.fill));
+  result.shortage = Math.max(0, Math.round(result.shortage));
+  result.inventory = Math.max(0, Math.round(result.inventory));
+  return result;
+}
 
 function PageTitle({ kicker, title, copy }: { kicker: string; title: string; copy: string }) {
   return <header className="sectionHeader"><span>{kicker}</span><h1>{title}</h1><p>{copy}</p></header>;
@@ -87,11 +171,29 @@ function Metric({ label, value, detail, accent = false }: { label: string; value
 
 export default function Dashboard() {
   const [page, setPage] = useState<Page>("overview");
+  const [labMode, setLabMode] = useState<LabMode>("verified");
   const [groupId, setGroupId] = useState("safety");
   const [scenarioId, setScenarioId] = useState("base");
-  const scenario = scenarios[scenarioId];
+  const [whatIfInputs, setWhatIfInputs] = useState<WhatIfInputs>({ ...baseInputs });
+  const [copied, setCopied] = useState(false);
+  const verifiedScenario = scenarios[scenarioId];
   const base = scenarios.base;
   const activeGroup = scenarioGroups.find((group) => group.id === groupId) ?? scenarioGroups[0];
+  const exactLiveScenarioId = exactScenarioFor(whatIfInputs);
+  const liveScenario = exactLiveScenarioId ? scenarios[exactLiveScenarioId] : estimateScenario(whatIfInputs);
+  const result = labMode === "verified" ? verifiedScenario : liveScenario;
+  const resultIsVerified = labMode === "verified" || Boolean(exactLiveScenarioId);
+
+  const updateInput = (key: InputKey, value: number) => {
+    setWhatIfInputs((current) => ({ ...current, [key]: value }));
+  };
+
+  const copySnapshot = async () => {
+    const inputSummary = inputControls.map((control) => `${control.label}: ${whatIfInputs[control.key]}${control.suffix}`).join("; ");
+    await navigator.clipboard.writeText(`Olist OR Lab what-if — ${inputSummary}. Cost R$${money.format(result.cost)}, fill ${result.fill.toFixed(2)}%, shortage ${money.format(result.shortage)}, ending inventory ${money.format(result.inventory)}. ${resultIsVerified ? "Solver-verified scenario." : "Calibrated preview; rerun the MILP before making a final claim."}`);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
 
   const showPage = (next: Page) => {
     setPage(next);
@@ -233,28 +335,51 @@ export default function Dashboard() {
 
       {page === "sensitivity" && (
         <div className="pageWrap sensitivityPage">
-          <PageTitle kicker="Verified sensitivity lab" title="Change one assumption. See the operational consequence." copy="This MVP uses the eleven scenarios already solved by the MILP. It does not interpolate or invent unsolved results." />
+          <PageTitle kicker="Interactive sensitivity lab" title="Test one solved case—or combine assumptions instantly." copy="Verified Runs reproduces the eleven MILP outputs. Live What-if combines their measured one-factor effects into a transparent, instant planning preview." />
+          <div className="labModeToggle" role="tablist" aria-label="Sensitivity analysis mode">
+            <button role="tab" aria-selected={labMode === "verified"} className={labMode === "verified" ? "active" : ""} onClick={() => setLabMode("verified")}><span>01</span><b>Verified runs</b><small>Exact MILP outputs</small></button>
+            <button role="tab" aria-selected={labMode === "live"} className={labMode === "live" ? "active" : ""} onClick={() => setLabMode("live")}><span>02</span><b>Live what-if</b><small>Six inputs · instant response</small></button>
+          </div>
           <section className="labLayout">
             <aside className="controlPanel">
-              <div className="controlIntro"><span className="panelKicker">1 · Choose parameter</span><p>One-factor-at-a-time design</p></div>
-              <div className="groupButtons">{scenarioGroups.map((group) => <button key={group.id} className={groupId === group.id ? "active" : ""} onClick={() => { setGroupId(group.id); setScenarioId("base"); }}><span>{group.label}</span><b>→</b></button>)}</div>
-              <div className="valueControl"><span className="panelKicker">2 · Set tested value</span><div>{activeGroup.options.map(([id, label]) => <button key={`${groupId}-${id}`} className={scenarioId === id ? "active" : ""} onClick={() => setScenarioId(id)}>{label}</button>)}</div></div>
-              <div className="verifiedNote"><span>✓</span><p><b>Solver-verified result</b><br />13 rolling weeks · integer flows · same actual demand</p></div>
+              {labMode === "verified" ? (
+                <>
+                  <div className="controlIntro"><span className="panelKicker">1 · Choose parameter</span><p>One-factor-at-a-time design</p></div>
+                  <div className="groupButtons">{scenarioGroups.map((group) => <button key={group.id} className={groupId === group.id ? "active" : ""} onClick={() => { setGroupId(group.id); setScenarioId("base"); }}><span>{group.label}</span><b>→</b></button>)}</div>
+                  <div className="valueControl"><span className="panelKicker">2 · Set tested value</span><div>{activeGroup.options.map(([id, label]) => <button key={`${groupId}-${id}`} className={scenarioId === id ? "active" : ""} onClick={() => setScenarioId(id)}>{label}</button>)}</div></div>
+                </>
+              ) : (
+                <>
+                  <div className="controlIntro"><span className="panelKicker">Live control panel</span><p>Move any slider; results update immediately.</p></div>
+                  <div className="sliderList">
+                    {inputControls.map((control) => (
+                      <label key={control.key} className="sliderControl">
+                        <span><b>{control.label}</b><output>{whatIfInputs[control.key].toFixed(control.step < 1 ? 2 : 0)}{control.suffix}</output></span>
+                        <input aria-label={control.label} type="range" min={control.min} max={control.max} step={control.step} value={whatIfInputs[control.key]} onChange={(event) => updateInput(control.key, Number(event.target.value))} />
+                        <small><i>{control.min}{control.suffix}</i><i>Base {baseInputs[control.key]}{control.suffix}</i><i>{control.max}{control.suffix}</i></small>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="labActions"><button onClick={() => setWhatIfInputs({ ...baseInputs })}>Reset base</button><button onClick={copySnapshot}>{copied ? "Copied ✓" : "Copy snapshot"}</button></div>
+                </>
+              )}
+              <div className={`verifiedNote ${resultIsVerified ? "" : "estimated"}`}><span>{resultIsVerified ? "✓" : "≈"}</span><p><b>{resultIsVerified ? "Solver-verified result" : "Calibrated instant estimate"}</b><br />{resultIsVerified ? "13 rolling weeks · integer flows · same actual demand" : "Additive interpolation · validate with MILP before final reporting"}</p></div>
             </aside>
 
             <div className="labResults">
-              <div className="resultHeader"><div><span className="panelKicker">Selected scenario</span><h2>{activeGroup.label}: {activeGroup.options.find(([id]) => id === scenarioId)?.[1]}</h2></div><span className="scenarioTag">{scenario.id.replaceAll("_", " ")}</span></div>
+              <div className="resultHeader"><div><span className="panelKicker">{labMode === "verified" ? "Selected scenario" : "Live operational preview"}</span><h2>{labMode === "verified" ? `${activeGroup.label}: ${activeGroup.options.find(([id]) => id === scenarioId)?.[1]}` : "Combined operating assumptions"}</h2></div><span className={`scenarioTag ${resultIsVerified ? "" : "estimated"}`}>{resultIsVerified ? (labMode === "verified" ? verifiedScenario.id : exactLiveScenarioId)?.replaceAll("_", " ") : "estimated combination"}</span></div>
               <div className="comparisonGrid">
-                <Metric label="Total cost" value={`R$${money.format(scenario.cost)}`} detail={`${signed((scenario.cost / base.cost - 1) * 100)}% vs base`} accent={scenario.cost < base.cost} />
-                <Metric label="Fill rate" value={`${scenario.fill.toFixed(2)}%`} detail={`${signed(scenario.fill - base.fill, 2)} points vs base`} />
-                <Metric label="Shortage units" value={money.format(scenario.shortage)} detail={`${signed(scenario.shortage - base.shortage, 0)} units vs base`} />
-                <Metric label="Ending inventory" value={money.format(scenario.inventory)} detail={`${signed(scenario.inventory - base.inventory, 0)} units vs base`} />
+                <Metric label="Total cost" value={`R$${money.format(result.cost)}`} detail={`${signed((result.cost / base.cost - 1) * 100)}% vs base`} accent={result.cost < base.cost} />
+                <Metric label="Fill rate" value={`${result.fill.toFixed(2)}%`} detail={`${signed(result.fill - base.fill, 2)} points vs base`} />
+                <Metric label="Shortage units" value={money.format(result.shortage)} detail={`${signed(result.shortage - base.shortage, 0)} units vs base`} />
+                <Metric label="Ending inventory" value={money.format(result.inventory)} detail={`${signed(result.inventory - base.inventory, 0)} units vs base`} />
               </div>
               <article className="scenarioChart whitePanel">
                 <div className="panelHead"><div><span className="panelKicker">Base vs selected</span><h2>Cost and service trade-off</h2></div></div>
-                <div className="comparisonBars"><div><span>Base cost</span><div><i style={{ width: `${base.cost / Math.max(base.cost, scenario.cost) * 100}%` }} /></div><strong>R${money.format(base.cost)}</strong></div><div><span>Selected cost</span><div><i className="selected" style={{ width: `${scenario.cost / Math.max(base.cost, scenario.cost) * 100}%` }} /></div><strong>R${money.format(scenario.cost)}</strong></div><div className="fill"><span>Base service</span><div><i style={{ width: `${base.fill}%` }} /></div><strong>{base.fill.toFixed(2)}%</strong></div><div className="fill"><span>Selected service</span><div><i className="selected" style={{ width: `${scenario.fill}%` }} /></div><strong>{scenario.fill.toFixed(2)}%</strong></div></div>
+                <div className="comparisonBars"><div><span>Base cost</span><div><i style={{ width: `${base.cost / Math.max(base.cost, result.cost) * 100}%` }} /></div><strong>R${money.format(base.cost)}</strong></div><div><span>Selected cost</span><div><i className="selected" style={{ width: `${result.cost / Math.max(base.cost, result.cost) * 100}%` }} /></div><strong>R${money.format(result.cost)}</strong></div><div className="fill"><span>Base service</span><div><i style={{ width: `${base.fill}%` }} /></div><strong>{base.fill.toFixed(2)}%</strong></div><div className="fill"><span>Selected service</span><div><i className="selected" style={{ width: `${result.fill}%` }} /></div><strong>{result.fill.toFixed(2)}%</strong></div></div>
               </article>
-              <article className="interpretation"><span>Interpretation</span><p>{scenario.note}</p></article>
+              <article className={`interpretation ${resultIsVerified ? "" : "estimated"}`}><span>{resultIsVerified ? "Interpretation" : "Model boundary"}</span><p>{result.note}</p></article>
+              {labMode === "live" && <article className="calibrationNote"><b>How the instant preview works</b><p>Each slider is piecewise-linear between the base case and its solved low/high anchor. When several sliders move, their measured changes are added. An exact check mark appears whenever the inputs match one of the twelve stored solver results.</p></article>}
             </div>
           </section>
         </div>

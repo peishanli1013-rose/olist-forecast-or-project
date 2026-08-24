@@ -8,7 +8,7 @@ This project implements a reproducible **describe → forecast → plan → fulf
 
 Live site: [Olist OR Lab](https://olist-forecast-or-lab.peishanli1013.chatgpt.site)
 
-[`site/`](site/) contains the complete source for the English interactive website. It has Overview, Demand, Forecast, Optimization, and Sensitivity sections. Its controls expose eleven scenarios already solved by the MILP across safety buffer, lead time, service target, capacity, risk weights, and shortage value. The interface does not interpolate unsolved parameter combinations.
+[`site/`](site/) contains the complete source for the English interactive website. It has Overview, Demand, Forecast, Optimization, and Sensitivity sections. **Verified Runs** reproduces the one-factor MILP outputs exactly. **Live What-if** lets users adjust safety buffer, lead time, service target, capacity, risk weights, and shortage value together; a piecewise-linear additive response surface calibrated to the solved anchors updates the metrics instantly. The interface labels combined previews as estimates and shows solver-verified status only when the inputs exactly match a stored solve.
 
 ```bash
 cd site
